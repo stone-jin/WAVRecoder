@@ -1,0 +1,551 @@
+﻿package com.wavrecoder.test;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.apache.commons.net.ftp.FTP;
+import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPReply;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Message;
+import android.renderscript.Element;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.view.Menu;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.TextView;
+import android.widget.Toast;
+
+public class MainActivity extends Activity implements Runnable{
+	private Button start, stop;
+	private ExtAudioRecorder extAudioRecorder;
+	private String filename;
+	private String path;
+	private boolean recording = false;
+	private Button playButton;
+	private ImageButton listButton, settingButton;
+	private TextView infoTextView;
+	private String abspath;
+	
+	private Thread thread;
+	private boolean i;
+	
+	
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		setContentView(R.layout.activity_main);
+		ActivityManager.push(this);
+		dateInit();
+		start = (Button) findViewById(R.id.button1);
+		stop = (Button) findViewById(R.id.button2);
+		infoTextView = (TextView) findViewById(R.id.textView1);
+		playButton  = (Button) findViewById(R.id.imageButton2);
+		listButton  = (ImageButton) findViewById(R.id.button3);
+		settingButton =  (ImageButton) findViewById(R.id.imageButton1);
+
+		listButton.setOnClickListener(new OnClickListener() {
+			
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				startActivity(new Intent(getApplicationContext(), RecorderListActivity.class));
+			}
+		});
+		settingButton.setOnClickListener(new OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				startActivity(new Intent(getApplicationContext(), SettingActivity.class));
+			}
+		});
+		path = Environment.getExternalStorageDirectory().getAbsolutePath()
+				+ "/" + "AAA" + "/";
+
+		start.setOnClickListener(new OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				Date now = new Date();
+				SimpleDateFormat dateFormat = new SimpleDateFormat(
+						"yyyyMMddHHmmss");//
+				filename = dateFormat.format(now).toString() + ".wav";
+				abspath =  path + filename;
+				System.out.println(abspath);
+				if (!recording) {
+					// 获取类的实例
+					extAudioRecorder = ExtAudioRecorder.getInstanse(false); // 未压缩的录音（WAV）
+					recordChat(extAudioRecorder, path, filename);
+				}
+				thread.start();
+			}
+		});
+		stop.setOnClickListener(new OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				if (extAudioRecorder != null && recording) {
+					stopRecord(extAudioRecorder);
+					String string = "录音文件保存的位置" + path + filename;
+					infoTextView.setText(string);
+				} else {
+					Toast.makeText(getApplicationContext(), "录音未开始",
+							Toast.LENGTH_SHORT).show();
+					return;
+				}
+
+	
+				if (checknetwork()) {
+					ipaddress= SharePersistent.getInstance().getPerference(getApplicationContext(), "ipaddress");
+					 port=SharePersistent.getInstance().getPerference(getApplicationContext(), "port");
+					 username =SharePersistent.getInstance().getPerference(getApplicationContext(), "username");
+					 password=SharePersistent.getInstance().getPerference(getApplicationContext(), "password");
+					 if (ipaddress!=null && ipaddress.length()>0) {
+							if (port!=null && port.length()>0) {
+								ftpUpload(ipaddress, port, username, password, remotePath,
+										fileNamePath, filename);
+							}else {
+								Toast.makeText(getApplicationContext(), "端口设置为空，请检查", Toast.LENGTH_SHORT).show();
+							}
+						}else {
+							Toast.makeText(getApplicationContext(), "ip地址设置为空，请检查", Toast.LENGTH_SHORT).show();
+						}
+				}else {
+					Toast.makeText(getApplicationContext(), "当前无网络，无法上传录音文件，请检查网络", Toast.LENGTH_SHORT).show();
+				}
+				
+				dateInit();
+			}
+		});
+		playButton.setEnabled(false);
+		
+		playButton.setOnClickListener(new OnClickListener() {
+			
+			@Override
+			public void onClick(View v) {
+				// TODO Auto-generated method stub
+				if (abspath!=null && abspath.length()>0 && (!recording)) {
+					Intent i=new Intent(Intent.ACTION_VIEW);
+					Uri uri=Uri.parse("file://"+abspath);
+					i.setDataAndType(uri, "audio/*");
+					startActivity(i);
+				}
+			}
+		});
+	}
+	
+	private void dateInit(){
+		thread = new Thread(this);
+		i = false;
+	}
+	
+	private void dateInit1(){
+		thread = new Thread(this);
+	}
+	
+	private void judgeConnect(){
+		executorService.execute(new Runnable() {
+			
+			@Override
+			public void run() {
+				// TODO Auto-generated method stub
+				 boolean flage =ftpconnect(ipaddress, port, username, password, remotePath);
+				 if (flage) {
+					
+				}else {
+					updateUIHandler.sendEmptyMessage(7);
+				}
+			}
+		});
+	}
+	String ipaddress,port,username,password;
+	String remotePath = "";
+	String fileNamePath = "/sdcard/AAA/";
+	@Override
+	protected void onResume() {
+		// TODO Auto-generated method stub
+		super.onResume();
+		//首先判断有没有网络,然后判断有没有设置ftp信息，再判断能不能连接上ftp
+		if (checknetwork()) {
+			ipaddress= SharePersistent.getInstance().getPerference(getApplicationContext(), "ipaddress");
+			port=SharePersistent.getInstance().getPerference(getApplicationContext(), "port");
+			username =SharePersistent.getInstance().getPerference(getApplicationContext(), "username");
+			password=SharePersistent.getInstance().getPerference(getApplicationContext(), "password");
+			if (ipaddress.length()>0) {
+				
+				judgeConnect();
+				
+			}else {
+				AlertDialog   dialog = new AlertDialog.Builder(MainActivity.this).setMessage("请设置ftp信息")
+						.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+							
+							@Override
+							public void onClick(DialogInterface dialog, int which) {
+								// TODO Auto-generated method stub
+								startActivity(new Intent(getApplicationContext(), SettingActivity.class));
+							}
+						}).setNegativeButton("取消", new DialogInterface.OnClickListener() {
+							
+							@Override
+							public void onClick(DialogInterface dialog, int which) {
+								// TODO Auto-generated method stub
+								
+							}
+						}).create();
+				dialog.show();
+			}
+		}else {
+			openNet("网络提示", "请检查手机网络是否打开");
+		}
+	}
+	
+	
+
+	private void openNet(String title, String message) {
+		// 让用户检查网络
+		AlertDialog.Builder adb = new AlertDialog.Builder(
+				MainActivity.this);
+		final AlertDialog ad = adb.create();
+		// String current = "当前无法获取定位信息";
+		ad.setTitle(title);
+		ad.setMessage(message);
+		ad.setButton("确定", new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				//由于4.0以上把原来的设置方式舍弃了所以上面的代码舍去
+				if(android.os.Build.VERSION.SDK_INT > 13 ){  
+					//3.2以上打开设置界面，也可以直接用ACTION_WIRELESS_SETTINGS打开到wifi界面  
+					startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}
+				else {    
+					startActivity(new Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS));
+				}
+				ad.dismiss();
+			}
+		});
+		ad.setButton2("取消", new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				ad.dismiss();
+				System.exit(0);
+			}
+		});
+		ad.show();
+	}
+	
+	
+	
+	public boolean checknetwork() {
+		ConnectivityManager cm = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+		  if( cm == null )
+		   return false;
+		  NetworkInfo netinfo = cm.getActiveNetworkInfo();
+		  if (netinfo == null )
+		  {
+		   return false;
+		  }
+		  if(netinfo.isConnected())
+		  {
+		   return true;
+		  }
+		  return false;
+		
+	}
+
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		// Inflate the menu; this adds items to the action bar if it is present.
+		getMenuInflater().inflate(R.menu.main, menu);
+		return true;
+	}
+
+	private ProgressDialog progressDialog;
+
+	private void showDialog() {
+		if (progressDialog == null) {
+			progressDialog = new ProgressDialog(MainActivity.this);
+			progressDialog.setMessage("数据上传中请稍后....");
+			progressDialog.show();
+		}
+	}
+
+	private void dismissDialog() {
+		if (progressDialog != null && progressDialog.isShowing()) {
+			progressDialog.dismiss();
+		}
+	}
+
+	/**
+	 * 录制wav格式文件
+	 * 
+	 * @param path
+	 *            : 文件路径
+	 */
+	public File recordChat(ExtAudioRecorder extAudioRecorder, String savePath,
+			String fileName) {
+		File dir = new File(savePath);
+		// 如果该目录没有存在，则新建目录
+		if (dir.list() == null) {
+			dir.mkdirs();
+		}
+		// 获取录音文件
+		File file = new File(savePath + fileName);
+		// 设置输出文件
+		extAudioRecorder.setOutputFile(savePath + fileName);
+
+		extAudioRecorder.prepare();
+		// 开始录音
+		extAudioRecorder.start();
+		recording = true;
+		infoTextView.setText("正在录音....");
+		updateUIHandler.sendEmptyMessage(5);
+		return file;
+	}
+
+	/**
+	 * 停止录音
+	 * 
+	 * @param mediaRecorder
+	 *            待停止的录音机
+	 * @return 返回
+	 */
+	public void stopRecord(final ExtAudioRecorder extAudioRecorder) {
+		extAudioRecorder.stop();
+		extAudioRecorder.release();
+		recording = false;
+		infoTextView.setText("录音已经停止");
+		updateUIHandler.sendEmptyMessage(6);
+	}
+
+	private ExecutorService executorService = Executors.newFixedThreadPool(5);
+	/**
+	 * 
+	 * 通过ftp上传文件
+	 * 
+	 * @param url
+	 *            ftp服务器地址 如： 192.168.1.110
+	 * 
+	 * @param port
+	 *            端口如 ： 21
+	 * 
+	 * @param username
+	 *            登录名
+	 * 
+	 * @param password
+	 *            密码
+	 * 
+	 * @param remotePath
+	 *            上到ftp服务器的磁盘路径
+	 * 
+	 * @param fileNamePath
+	 *            要上传的文件路径
+	 * 
+	 * @param fileName
+	 *            要上传的文件名
+	 * 
+	 * @return
+	 */
+	private FTPClient ftpClient;
+
+	public void ftpUpload(final String url, final String port,
+			final String username, final String password,
+			final String remotePath, final String fileNamePath,
+			final String fileName) {
+		executorService.execute(new Runnable() {
+
+			@Override
+			public void run() {
+				// TODO Auto-generated method stub
+				ftpClient = new FTPClient();
+				FileInputStream fis = null;
+
+				try {
+
+					ftpClient.connect(url, Integer.parseInt(port));
+
+					boolean loginResult = ftpClient.login(username, password);
+
+					int returnCode = ftpClient.getReplyCode();
+
+					if (loginResult
+							&& FTPReply.isPositiveCompletion(returnCode)) {// 如果登录成功
+						updateUIHandler.sendEmptyMessage(4);
+						ftpClient.makeDirectory(remotePath);
+						// 设置上传目录
+						ftpClient.changeWorkingDirectory(remotePath);
+						ftpClient.setBufferSize(1024);
+						ftpClient.setControlEncoding("UTF-8");
+						ftpClient.setFileType(FTP.BINARY_FILE_TYPE);// 传递音视频文件必须添加
+						ftpClient.enterLocalPassiveMode();
+
+						fis = new FileInputStream(fileNamePath + fileName);
+
+						ftpClient.storeFile(fileName, fis);
+
+						updateUIHandler.sendEmptyMessage(1);// 上传成功
+					} else {// 如果登录失败
+						updateUIHandler.sendEmptyMessage(0);
+					}
+				} catch (IOException e) {
+
+					e.printStackTrace();
+					updateUIHandler.sendEmptyMessage(2);
+
+				} finally {
+
+					// IOUtils.closeQuietly(fis);
+					// 关闭连接
+
+				}
+
+			}
+
+		});
+
+	}
+	
+	
+	
+	public boolean ftpconnect(final String url, final String port,
+			final String username, final String password,
+			final String remotePath) {
+				// TODO Auto-generated method stub
+				ftpClient = new FTPClient();
+				FileInputStream fis = null;
+				try {
+					ftpClient.connect(url, Integer.parseInt(port));
+					boolean loginResult = ftpClient.login(username, password);
+					int returnCode = ftpClient.getReplyCode();
+					if (loginResult
+							&& FTPReply.isPositiveCompletion(returnCode)) {// 如果登录成功
+						return  true;
+					} else {// 如果登录失败
+						return false;
+					}
+				} catch (IOException e) {
+					e.printStackTrace();
+					return false;
+				} 
+
+			}
+
+
+	@Override
+	protected void onDestroy() {
+		// TODO Auto-generated method stub
+		super.onDestroy();
+		try {
+			if (ftpClient != null) {
+				ftpClient.disconnect();
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+			updateUIHandler.sendEmptyMessage(3);
+		}
+		ActivityManager.pop();
+	}
+
+	private Handler updateUIHandler = new Handler() {
+		public void handleMessage(Message msg) {
+			switch (msg.what) {
+			case 0:
+				Toast.makeText(getApplicationContext(),
+						"登录ftp服务器失败，请检查用户名密码是否正确", Toast.LENGTH_SHORT).show();
+
+				break;
+			case 1:
+				dismissDialog();
+				Toast.makeText(getApplicationContext(), "文件上传成功",
+						Toast.LENGTH_SHORT).show();
+				break;
+			case 2:
+				dismissDialog();
+				Toast.makeText(getApplicationContext(), "ftp客户端连接服务器失败，请检查",
+						Toast.LENGTH_SHORT).show();
+				break;
+			case 3:
+				Toast.makeText(getApplicationContext(), "关闭FTP连接发生异常",
+						Toast.LENGTH_SHORT).show();
+				break;
+			case 4:
+
+				showDialog();
+				break;
+			case 5:
+				start.setBackgroundDrawable(getResources().getDrawable(
+						R.drawable.btn_rekam_disabled));
+				start.setEnabled(false);
+				stop.setEnabled(true);
+				stop.setBackgroundDrawable(getResources().getDrawable(
+						R.drawable.btn_stop_normal));
+				playButton.setEnabled(false);
+				break;
+
+			case 6:
+				start.setBackgroundDrawable(getResources().getDrawable(
+						R.drawable.btn_rekam_normal));
+				start.setEnabled(true);
+				stop.setEnabled(false);
+				stop.setBackgroundDrawable(getResources().getDrawable(
+						R.drawable.btn_stop_disabled));
+				playButton.setEnabled(true);
+				break;
+			case 7:
+				Toast.makeText(getApplicationContext(), "无法连接ftp服务器，请检查ftp设置以及网络是否联通 ", Toast.LENGTH_SHORT).show();
+				break;
+			default:
+				break;
+			}
+		};
+	};
+	
+	
+	
+	public void onBackPressed() {
+		
+		AlertDialog dialog=  new AlertDialog.Builder(MainActivity.this)
+		.setMessage("是否要退出本软件").setPositiveButton("是", new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				// TODO Auto-generated method stub
+				finish();
+			}
+		}).setNegativeButton("取消", new DialogInterface.OnClickListener() {
+			
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				// TODO Auto-generated method stub
+				
+			}
+		}).create();
+		dialog.show();
+	}
+	@Override
+	public void run() {
+		// TODO Auto-generated method stub
+		if(i == false){
+			i = true;
+			System.out.println("run()");
+		}
+		else{
+			i = false;
+			System.out.println("run1()");
+		}
+	};
+}

@@ -1,4 +1,5 @@
-WAVRecoder
-==========
-
-an android app for wavRecoder
+### 2014年4月21日
+```
+版本1
+1.新建一个项目，学习git遇到一些问题
+```
